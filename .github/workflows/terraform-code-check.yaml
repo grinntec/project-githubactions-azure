@@ -1,0 +1,72 @@
+name: Terraform Code Quality Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+# Give the default GITHUB_TOKEN write permission to commit and push the
+ # added or changed files to the repository.
+permissions:
+  id-token: write
+  contents: write
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_USE_OIDC: true
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # An automatically generated secret provided by GitHub for use in GitHub Actions.
+
+jobs:
+
+  terraform-fmt-validate:
+    name: 'Terraform FMT & Validate'
+    runs-on: ubuntu-latest
+    steps:
+    - name: 'Azure CLI login'
+      uses: azure/login@v1
+      with:
+        client-id: ${{ env.ARM_CLIENT_ID }}
+        tenant-id: ${{ env.ARM_TENANT_ID }}
+        subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+    - name: Checkout the repository
+      uses: actions/checkout@v4
+      with:
+        ref: main
+         
+    - name: Setup Terraform on the runner
+      uses: hashicorp/setup-terraform@v2.0.3
+
+    - name: Terraform init, fmt, & validate
+      run: |
+        cd ./terraform
+        terraform init -backend=false
+        terraform fmt
+        terraform validate
+      continue-on-error: true        
+
+    - name: Auto-commit
+      uses: stefanzweifel/git-auto-commit-action@v5.0.0
+      with:
+        commit_message: Terraform FMT & Validate
+
+  update-pr:
+    name: 'Update PR with Feedback'
+    needs: [terraform-fmt-validate]
+    runs-on: ubuntu-latest
+    if: ${{ needs.terraform-fmt-validate.result == 'failure' }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v2
+
+      - name: Create PR Comment
+        uses: thollander/actions-comment-pull-request@v1
+        with:
+          message: |
+            ## Terraform Code Quality Checks Failed
+            - Terraform FMT & Validate: ${{ needs.terraform-fmt-validate.result }}
+            Please review and fix the issues.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
